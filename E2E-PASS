@@ -1,0 +1,1 @@
+searchapi: tools (brave_web_search, serpapi_search, linkup_search) ✓ · commands (/searchapi status/set) ✓ · state (~/.gray/searchapi/config.json mode 0600) ✓ · CLI (manifest, status, set) ✓

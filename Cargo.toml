@@ -1,0 +1,17 @@
+[package]
+name = "gray-searchapi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT"
+description = "Keyed web search: Brave, SerpApi, Linkup behind one {results:[{title,url,snippet}]} shape"
+
+[[bin]]
+name = "gray-searchapi"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[profile.release]
+strip = true
