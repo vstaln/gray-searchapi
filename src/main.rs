@@ -69,7 +69,7 @@ fn manifest() -> Value {
 fn state_dir() -> PathBuf {
     let home = std::env::var_os("GRAY_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".gray")))
+        .or_else(|| std::env::home_dir().map(|h| h.join(".gray")))
         .unwrap_or_else(|| PathBuf::from("."));
     home.join("searchapi")
 }
@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn unkeyed_and_bad_args_are_tool_errors() {
         unsafe {
-            std::env::set_var("GRAY_HOME", "/tmp/searchapi-test-nokeys");
+            std::env::set_var("GRAY_HOME", std::env::temp_dir().join("searchapi-test-nokeys"));
             for (_, env, _) in providers() {
                 std::env::remove_var(env);
             }
