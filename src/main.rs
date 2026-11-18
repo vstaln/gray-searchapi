@@ -61,6 +61,7 @@ fn manifest() -> Value {
             }
         ],
         "commands": ["/searchapi"],
+        "command_descriptions": {"/searchapi": "show which search API keys are set"},
     })
 }
 
