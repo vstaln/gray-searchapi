@@ -100,9 +100,15 @@ fn api_key(env: &str, cfg_key: &str) -> Option<String> {
 }
 
 fn key_source(env: &str, cfg_key: &str) -> Option<&'static str> {
-    if std::env::var(env).map(|v| !v.trim().is_empty()).unwrap_or(false) {
+    if std::env::var(env)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
         Some("env")
-    } else if read_config()[cfg_key].as_str().is_some_and(|s| !s.is_empty()) {
+    } else if read_config()[cfg_key]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
+    {
         Some("config")
     } else {
         None
@@ -143,7 +149,10 @@ fn run_curl(extra: &[String]) -> Result<(u16, String), String> {
     let (body, status) = text.rsplit_once('\n').unwrap_or((&text, "0"));
     let status: u16 = status.trim().parse().unwrap_or(0);
     if status == 0 && !out.status.success() {
-        return Err(format!("curl failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "curl failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     Ok((status, body.to_string()))
 }
@@ -155,11 +164,18 @@ fn api_err(provider: &str, status: u16, body: &str) -> String {
             ["/error/message", "/error", "/message", "/detail"]
                 .iter()
                 .filter_map(|p| v.pointer(p))
-                .map(|d| d.as_str().map(str::to_string).unwrap_or_else(|| d.to_string()))
+                .map(|d| {
+                    d.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| d.to_string())
+                })
                 .next()
         })
         .unwrap_or_else(|| body.chars().take(300).collect());
-    format!("{provider} → HTTP {status}: {}", detail.chars().take(300).collect::<String>())
+    format!(
+        "{provider} → HTTP {status}: {}",
+        detail.chars().take(300).collect::<String>()
+    )
 }
 
 // ---------- providers --------------------------------------------------------
@@ -193,12 +209,25 @@ fn brave(query: &str, count: usize, token: &str) -> Result<Vec<Hit>, String> {
         url_encode(query)
     );
     let auth = format!("X-Subscription-Token: {token}");
-    let (status, body) = run_curl(&["-H".into(), auth, "-H".into(), "Accept: application/json".into(), url])?;
+    let (status, body) = run_curl(&[
+        "-H".into(),
+        auth,
+        "-H".into(),
+        "Accept: application/json".into(),
+        url,
+    ])?;
     if !(200..300).contains(&status) {
         return Err(api_err("brave", status, &body));
     }
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("brave: unreadable reply: {e}"))?;
-    Ok(collect(v.pointer("/web/results").and_then(Value::as_array), "title", "url", "description", count))
+    let v: Value =
+        serde_json::from_str(&body).map_err(|e| format!("brave: unreadable reply: {e}"))?;
+    Ok(collect(
+        v.pointer("/web/results").and_then(Value::as_array),
+        "title",
+        "url",
+        "description",
+        count,
+    ))
 }
 
 fn serpapi(query: &str, engine: &str, count: usize, token: &str) -> Result<Vec<Hit>, String> {
@@ -212,28 +241,46 @@ fn serpapi(query: &str, engine: &str, count: usize, token: &str) -> Result<Vec<H
     if !(200..300).contains(&status) {
         return Err(api_err("serpapi", status, &body));
     }
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("serpapi: unreadable reply: {e}"))?;
-    Ok(collect(v.get("organic_results").and_then(Value::as_array), "title", "link", "snippet", count))
+    let v: Value =
+        serde_json::from_str(&body).map_err(|e| format!("serpapi: unreadable reply: {e}"))?;
+    Ok(collect(
+        v.get("organic_results").and_then(Value::as_array),
+        "title",
+        "link",
+        "snippet",
+        count,
+    ))
 }
 
 fn linkup(query: &str, depth: &str, count: usize, token: &str) -> Result<Vec<Hit>, String> {
     let req = json!({"q": query, "depth": depth, "outputType": "searchResults"});
     let auth = format!("Authorization: Bearer {token}");
     let (status, body) = run_curl(&[
-        "-X".into(), "POST".into(),
-        "-H".into(), auth,
-        "-H".into(), "Content-Type: application/json".into(),
-        "-d".into(), req.to_string(),
+        "-X".into(),
+        "POST".into(),
+        "-H".into(),
+        auth,
+        "-H".into(),
+        "Content-Type: application/json".into(),
+        "-d".into(),
+        req.to_string(),
         "https://api.linkup.so/v1/search".into(),
     ])?;
     if !(200..300).contains(&status) {
         return Err(api_err("linkup", status, &body));
     }
-    let v: Value = serde_json::from_str(&body).map_err(|e| format!("linkup: unreadable reply: {e}"))?;
+    let v: Value =
+        serde_json::from_str(&body).map_err(|e| format!("linkup: unreadable reply: {e}"))?;
     // searchResults → results[]; sourcedAnswer-style replies carry sources[].
     let hits = match v.get("results").and_then(Value::as_array) {
         Some(items) => collect(Some(items), "name", "url", "content", count),
-        None => collect(v.get("sources").and_then(Value::as_array), "name", "url", "snippet", count),
+        None => collect(
+            v.get("sources").and_then(Value::as_array),
+            "name",
+            "url",
+            "snippet",
+            count,
+        ),
     };
     Ok(hits)
 }
@@ -252,7 +299,11 @@ fn call_tool(name: &str, args: &Value) -> Value {
     let Some((_, env, cfg_key)) = providers().into_iter().find(|(n, _, _)| *n == name) else {
         return json!({"content": format!("unknown tool: {name}"), "is_error": true});
     };
-    let query = args.get("query").and_then(Value::as_str).unwrap_or("").trim();
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     if query.is_empty() {
         return json!({"content": format!("{name} needs a non-empty query"), "is_error": true});
     }
@@ -271,11 +322,18 @@ fn call_tool(name: &str, args: &Value) -> Value {
         "brave_web_search" => brave(query, count.clamp(1, 20), &token),
         "serpapi_search" => serpapi(
             query,
-            args.get("engine").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("google"),
+            args.get("engine")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("google"),
             count.clamp(1, 100),
             &token,
         ),
-        "linkup_search" => match args.get("depth").and_then(Value::as_str).unwrap_or("standard") {
+        "linkup_search" => match args
+            .get("depth")
+            .and_then(Value::as_str)
+            .unwrap_or("standard")
+        {
             d @ ("standard" | "deep") => linkup(query, d, count.clamp(1, 50), &token),
             other => Err(format!("bad depth '{other}' — standard|deep")),
         },
@@ -311,7 +369,9 @@ fn cli(argv: &[String]) -> Result<String, String> {
                     "--brave" => "brave_api_key",
                     "--serpapi" => "serpapi_key",
                     "--linkup" => "linkup_api_key",
-                    other => return Err(format!("unknown flag {other} — --brave|--serpapi|--linkup")),
+                    other => {
+                        return Err(format!("unknown flag {other} — --brave|--serpapi|--linkup"));
+                    }
                 };
                 c[key] = json!(it.next().ok_or_else(|| format!("{f} needs a key value"))?);
                 n += 1;
@@ -322,7 +382,8 @@ fn cli(argv: &[String]) -> Result<String, String> {
             let dir = state_dir();
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
             let path = dir.join("config.json");
-            std::fs::write(&path, serde_json::to_string_pretty(&c).unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(&path, serde_json::to_string_pretty(&c).unwrap())
+                .map_err(|e| e.to_string())?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -331,8 +392,9 @@ fn cli(argv: &[String]) -> Result<String, String> {
             Ok(format!("saved → {}", path.display()))
         }
         Some("status") | None => Ok(status_text()),
-        Some("-h" | "--help" | "help") => Ok(
-            "usage: searchapi set [--brave|--serpapi|--linkup KEY] | status".into()),
+        Some("-h" | "--help" | "help") => {
+            Ok("usage: searchapi set [--brave|--serpapi|--linkup KEY] | status".into())
+        }
         Some(o) => Err(format!("unknown verb {o} — status|set")),
     }
 }
@@ -358,7 +420,12 @@ fn handle(req: &Value) -> (Option<Value>, bool) {
             let argv: Vec<String> = params
                 .get("argv")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
                 .unwrap_or_default();
             json!({ "text": cli(&argv).unwrap_or_else(|e| e) })
         }
@@ -376,7 +443,9 @@ fn sidecar() -> std::io::Result<()> {
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
         let line = line?;
-        let Ok(req) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(req) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         let (reply, exit) = handle(&req);
         if let Some(reply) = reply {
             writeln!(stdout, "{reply}")?;
@@ -428,7 +497,9 @@ mod tests {
     use super::*;
 
     fn call(method: &str, params: Value) -> Value {
-        handle(&json!({ "id": 1, "method": method, "params": params })).0.unwrap()
+        handle(&json!({ "id": 1, "method": method, "params": params }))
+            .0
+            .unwrap()
     }
 
     #[test]
@@ -441,9 +512,18 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["brave_web_search", "serpapi_search", "linkup_search"]);
+        assert_eq!(
+            names,
+            ["brave_web_search", "serpapi_search", "linkup_search"]
+        );
         assert_eq!(m["commands"], json!(["/searchapi"]));
-        assert!(m["tools"].as_array().unwrap().iter().all(|t| t["parameters"]["required"] == json!(["query"])));
+        assert!(
+            m["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["parameters"]["required"] == json!(["query"]))
+        );
     }
 
     #[test]
@@ -455,18 +535,37 @@ mod tests {
     #[test]
     fn unkeyed_and_bad_args_are_tool_errors() {
         unsafe {
-            std::env::set_var("GRAY_HOME", std::env::temp_dir().join("searchapi-test-nokeys"));
+            std::env::set_var(
+                "GRAY_HOME",
+                std::env::temp_dir().join("searchapi-test-nokeys"),
+            );
             for (_, env, _) in providers() {
                 std::env::remove_var(env);
             }
         }
-        let r = call("tool/call", json!({ "name": "brave_web_search", "args": {"query": "x"} }));
+        let r = call(
+            "tool/call",
+            json!({ "name": "brave_web_search", "args": {"query": "x"} }),
+        );
         assert_eq!(r["result"]["is_error"], true);
-        assert!(r["result"]["content"].as_str().unwrap().contains("BRAVE_API_KEY"));
-        let r = call("tool/call", json!({ "name": "linkup_search", "args": {"query": " "} }));
+        assert!(
+            r["result"]["content"]
+                .as_str()
+                .unwrap()
+                .contains("BRAVE_API_KEY")
+        );
+        let r = call(
+            "tool/call",
+            json!({ "name": "linkup_search", "args": {"query": " "} }),
+        );
         assert!(r["result"]["content"].as_str().unwrap().contains("query"));
         let r = call("tool/call", json!({ "name": "nope", "args": {} }));
-        assert!(r["result"]["content"].as_str().unwrap().contains("unknown tool"));
+        assert!(
+            r["result"]["content"]
+                .as_str()
+                .unwrap()
+                .contains("unknown tool")
+        );
     }
 
     #[test]
@@ -481,22 +580,45 @@ mod tests {
             r#"{"results":[{"title":"T","url":"https://a.b","snippet":"s"},{"title":"T2","url":"https://c.d","snippet":""}]}"#
         );
         let serp = json!([{"title": "G", "link": "https://g", "snippet": "gs"}]);
-        assert_eq!(collect(serp.as_array(), "title", "link", "snippet", 10)[0].url, "https://g");
+        assert_eq!(
+            collect(serp.as_array(), "title", "link", "snippet", 10)[0].url,
+            "https://g"
+        );
         let link = json!([{"type": "text", "name": "L", "url": "https://l", "content": "lc"}]);
-        assert_eq!(collect(link.as_array(), "name", "url", "content", 10)[0].title, "L");
+        assert_eq!(
+            collect(link.as_array(), "name", "url", "content", 10)[0].title,
+            "L"
+        );
     }
 
     #[test]
     fn status_lists_each_provider() {
         unsafe { std::env::set_var("GRAY_HOME", "/tmp/searchapi-test-nokeys") };
         let t = status_text();
-        for s in ["brave_web_search", "serpapi_search", "linkup_search", "BRAVE_API_KEY", "MISSING"] {
+        for s in [
+            "brave_web_search",
+            "serpapi_search",
+            "linkup_search",
+            "BRAVE_API_KEY",
+            "MISSING",
+        ] {
             assert!(t.contains(s), "status missing {s}");
         }
-        let r = call("command/run", json!({ "name": "/searchapi", "argv": ["status"] }));
+        let r = call(
+            "command/run",
+            json!({ "name": "/searchapi", "argv": ["status"] }),
+        );
         assert!(r["result"]["text"].as_str().unwrap().contains("linkup"));
-        let r = call("command/run", json!({ "name": "/searchapi", "argv": ["bogus-verb"] }));
-        assert!(r["result"]["text"].as_str().unwrap().contains("unknown verb"));
+        let r = call(
+            "command/run",
+            json!({ "name": "/searchapi", "argv": ["bogus-verb"] }),
+        );
+        assert!(
+            r["result"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("unknown verb")
+        );
     }
 
     #[test]
